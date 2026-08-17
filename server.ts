@@ -14,7 +14,21 @@ const app = express();
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'forenclue-super-secret-key-2026';
 
-app.use(cors());
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'https://work.forenclue.in',
+      'https://ais-dev-dez7rzztl5zmxpysmmxlst-642747300953.asia-southeast1.run.app',
+      'https://ais-pre-dez7rzztl5zmxpysmmxlst-642747300953.asia-southeast1.run.app'
+    ];
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.forenclue.in') || origin.endsWith('.run.app')) {
+      callback(null, true);
+    } else {
+      callback(null, true);
+    }
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Storage Bucket setup for files and images
