@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { User } from '../types';
+import { apiFetch } from '../lib/api';
 
 interface AuthState {
   user: User | null;
@@ -37,19 +38,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
 
     try {
-      const response = await fetch('/api/auth/me', {
+      const data = await apiFetch('/api/auth/me', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        set({ user: data.user || data, token, loading: false });
-      } else {
-        localStorage.removeItem('auth_token');
-        set({ user: null, token: null, loading: false });
-      }
+      set({ user: data.user || data, token, loading: false });
     } catch (error) {
       console.error('Auth initialization error:', error);
       localStorage.removeItem('auth_token');

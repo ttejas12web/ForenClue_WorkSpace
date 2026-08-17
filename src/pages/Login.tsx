@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { apiFetch } from '../lib/api';
 import { Fingerprint, Lock, Mail, AlertCircle, Shield, ArrowRight, UserCheck } from 'lucide-react';
 
 export const Login = () => {
@@ -17,17 +18,11 @@ export const Login = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const data = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier, password }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to login');
-      }
 
       login(data.token, data.user);
       navigate('/');
