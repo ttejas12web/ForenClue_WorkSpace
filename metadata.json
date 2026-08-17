@@ -1,0 +1,6 @@
+{
+  "name": "ForenClue Workspace",
+  "description": "ForenClue internal workspace platform with real authentication, departmental channels, group creation, member management, and forensic collaboration tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
