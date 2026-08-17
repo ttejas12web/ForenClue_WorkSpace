@@ -1,6 +1,8 @@
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
+import multer from 'multer';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { db, pool } from './src/db/index';
 import { users, chatGroups, chatGroupMembers, chatMessages, tasks, notifications } from './src/db/schema';
@@ -14,6 +16,29 @@ const JWT_SECRET = process.env.JWT_SECRET || 'forenclue-super-secret-key-2026';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Storage Bucket setup for files and images
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+
+const upload = multer({ 
+  storage: storage, 
+  limits: { fileSize: 25 * 1024 * 1024 } // 25MB limit for files/images
+});
+
+app.use('/uploads', express.static(uploadsDir));
 
 // Auth Middleware Helper
 const authenticateToken = (req: any, res: any, next: any) => {
@@ -229,6 +254,20 @@ app.put('/api/users/:id/department', authenticateToken, async (req: any, res) =>
 
 // ================= CHAT API ENDPOINTS =================
 
+// File Upload endpoint (Storage Bucket)
+app.post('/api/upload', authenticateToken, upload.single('file'), (req: any, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    res.json({ url: fileUrl, name: req.file.originalname });
+  } catch (err: any) {
+    console.error('Error uploading file:', err);
+    res.status(500).json({ error: 'Failed to upload file' });
+  }
+});
+
 const formatMessageForUser = (msg: any, currentUserId: number, isSuperAdmin: boolean) => {
   if (!msg) return null;
   const senderId = msg.senderId !== undefined ? msg.senderId : msg.sender_id;
@@ -246,6 +285,8 @@ const formatMessageForUser = (msg: any, currentUserId: number, isSuperAdmin: boo
     return {
       ...msg,
       content: '🔒 [End-to-End Encrypted Message — Visible only to sender and ForenClue Admin]',
+      attachmentUrl: null,
+      attachmentName: null,
       isEncrypted: true,
     };
   }
@@ -291,7 +332,7 @@ app.get('/api/chat/groups', authenticateToken, async (req: any, res) => {
 
         // Fetch last message
         const lastMsgData = await pool.query(
-          `SELECT cm.id, cm.content, cm.created_at as "createdAt", u.name as "senderName", u.forenclue_id as "senderId", u.role as "senderRole"
+          `SELECT cm.id, cm.content, cm.attachment_url as "attachmentUrl", cm.attachment_name as "attachmentName", cm.created_at as "createdAt", u.name as "senderName", u.forenclue_id as "senderId", u.role as "senderRole"
            FROM chat_messages cm
            JOIN users u ON cm.sender_id = u.id
            WHERE cm.group_id = $1
@@ -735,7 +776,7 @@ app.get('/api/chat/groups/:id/messages', authenticateToken, async (req: any, res
     }
 
     const messagesData = await pool.query(
-      `SELECT cm.id, cm.group_id as "groupId", cm.sender_id as "senderId", cm.content, cm.created_at as "createdAt",
+      `SELECT cm.id, cm.group_id as "groupId", cm.sender_id as "senderId", cm.content, cm.attachment_url as "attachmentUrl", cm.attachment_name as "attachmentName", cm.created_at as "createdAt",
               u.name as "senderName", u.forenclue_id as "senderForenclueId", u.role as "senderRole", u.email as "senderEmail"
        FROM chat_messages cm
        JOIN users u ON cm.sender_id = u.id
@@ -758,18 +799,20 @@ app.get('/api/chat/groups/:id/messages', authenticateToken, async (req: any, res
 app.post('/api/chat/groups/:id/messages', authenticateToken, async (req: any, res) => {
   try {
     const groupId = parseInt(req.params.id);
-    const { content } = req.body;
+    const { content, attachmentUrl, attachmentName } = req.body;
     const senderId = req.user.id;
 
-    if (!content || !content.trim()) {
-      return res.status(400).json({ error: 'Message content cannot be empty' });
+    if ((!content || !content.trim()) && !attachmentUrl) {
+      return res.status(400).json({ error: 'Message content or attachment cannot be empty' });
     }
 
     // Insert message
     const newMsg = await db.insert(chatMessages).values({
       groupId,
       senderId,
-      content: content.trim(),
+      content: content ? content.trim() : (attachmentName ? `Sent attachment: ${attachmentName}` : 'Sent file attachment'),
+      attachmentUrl: attachmentUrl || null,
+      attachmentName: attachmentName || null,
     }).returning();
 
     const senderResult = await db.select().from(users).where(eq(users.id, senderId)).limit(1);
@@ -780,6 +823,8 @@ app.post('/api/chat/groups/:id/messages', authenticateToken, async (req: any, re
       groupId: newMsg[0].groupId,
       senderId: newMsg[0].senderId,
       content: newMsg[0].content,
+      attachmentUrl: newMsg[0].attachmentUrl,
+      attachmentName: newMsg[0].attachmentName,
       createdAt: newMsg[0].createdAt,
       senderName: sender.name,
       senderForenclueId: sender.forenclueId,

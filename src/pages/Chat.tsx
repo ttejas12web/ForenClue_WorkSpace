@@ -21,7 +21,10 @@ import {
   Shield,
   User,
   Mail,
-  Briefcase
+  Briefcase,
+  Paperclip,
+  FileText,
+  Image as ImageIcon
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 
@@ -56,6 +59,8 @@ interface ChatGroup {
   lastMessage: {
     id: number;
     content: string;
+    attachmentUrl?: string | null;
+    attachmentName?: string | null;
     createdAt: string;
     senderName: string;
     senderId: string;
@@ -67,6 +72,9 @@ interface ChatMessage {
   groupId: number;
   senderId: number;
   content: string;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  isEncrypted?: boolean;
   createdAt: string;
   senderName: string;
   senderForenclueId: string;
@@ -142,6 +150,28 @@ export const Chat = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFilePreview, setSelectedFilePreview] = useState<string | null>(null);
+
+  const handleMessageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 25 * 1024 * 1024) {
+        alert('File size must be less than 25MB');
+        return;
+      }
+      setSelectedFile(file);
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => setSelectedFilePreview(reader.result as string);
+        reader.readAsDataURL(file);
+      } else {
+        setSelectedFilePreview(null);
+      }
+    }
+  };
 
   const canManageActiveGroup = isSuperAdmin || (activeGroup && activeGroup.createdBy === user?.id && !activeGroup.isDirect);
 
@@ -288,25 +318,45 @@ export const Chat = () => {
   // Send message
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeGroup || !messageText.trim() || isSending) return;
+    if (!activeGroup || (!messageText.trim() && !selectedFile) || isSending) return;
 
     setIsSending(true);
     const content = messageText.trim();
-    setMessageText('');
+    let attachmentUrl = null;
+    let attachmentName = null;
 
     try {
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        });
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          attachmentUrl = uploadData.url;
+          attachmentName = uploadData.name;
+        }
+      }
+
       const res = await fetch(`/api/chat/groups/${activeGroup.id}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ content, attachmentUrl, attachmentName })
       });
 
       if (res.ok) {
         const newMsg = await res.json();
         setMessages(prev => [...prev, newMsg]);
+        setMessageText('');
+        setSelectedFile(null);
+        setSelectedFilePreview(null);
+        if (messageFileInputRef.current) messageFileInputRef.current.value = '';
         fetchGroups(false);
       }
     } catch (err) {
@@ -1061,6 +1111,31 @@ export const Chat = () => {
                         }`}
                       >
                         {msg.content}
+                        {msg.attachmentUrl && !msg.isEncrypted && (
+                          <div className="mt-2 pt-2 border-t border-white/20">
+                            {msg.attachmentUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                              <a href={msg.attachmentUrl} target="_blank" rel="noopener noreferrer" className="block">
+                                <img 
+                                  src={msg.attachmentUrl} 
+                                  alt={msg.attachmentName || 'Attachment'} 
+                                  className="max-h-48 rounded-xl object-cover border border-white/20 shadow-xs hover:opacity-95 transition-opacity"
+                                />
+                              </a>
+                            ) : (
+                              <a 
+                                href={msg.attachmentUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className={`flex items-center space-x-2 p-2 rounded-xl border transition-colors ${
+                                  isMe ? 'bg-blue-700/80 border-blue-400 text-white hover:bg-blue-700' : 'bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100'
+                                }`}
+                              >
+                                <Paperclip className="h-4 w-4 flex-shrink-0" />
+                                <span className="text-xs font-semibold truncate">{msg.attachmentName || 'Download File'}</span>
+                              </a>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1072,17 +1147,59 @@ export const Chat = () => {
 
           {/* Message Input Box */}
           <div className="p-3 sm:p-4 bg-white border-t border-slate-200">
+            {selectedFile && (
+              <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900">
+                <div className="flex items-center space-x-2 truncate">
+                  {selectedFilePreview ? (
+                    <img src={selectedFilePreview} alt="Preview" className="h-8 w-8 rounded-lg object-cover" />
+                  ) : (
+                    <FileText className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                  )}
+                  <div className="truncate">
+                    <p className="font-semibold truncate">{selectedFile.name}</p>
+                    <p className="text-[10px] text-blue-700">Ready to attach & send</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setSelectedFilePreview(null);
+                    if (messageFileInputRef.current) messageFileInputRef.current.value = '';
+                  }}
+                  className="p-1 hover:bg-blue-100 rounded-lg text-blue-700 transition-colors cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
+              <input 
+                type="file" 
+                ref={messageFileInputRef} 
+                onChange={handleMessageFileSelect} 
+                className="hidden" 
+              />
+              <button
+                type="button"
+                onClick={() => messageFileInputRef.current?.click()}
+                className="p-2.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer flex-shrink-0"
+                title="Attach file or image to send to Super Admin / Group"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+
               <input
                 type="text"
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                placeholder={`Message #${activeGroup.name}...`}
+                placeholder={`Message #${activeGroup.name} or add file attachment...`}
                 className="flex-1 px-3.5 sm:px-4 py-2.5 bg-slate-100 border border-transparent rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all placeholder:text-slate-400"
               />
               <button
                 type="submit"
-                disabled={!messageText.trim() || isSending}
+                disabled={(!messageText.trim() && !selectedFile) || isSending}
                 className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold text-xs rounded-xl shadow-sm transition-all flex items-center space-x-1.5 cursor-pointer min-h-[40px]"
               >
                 <Send className="h-3.5 w-3.5" />

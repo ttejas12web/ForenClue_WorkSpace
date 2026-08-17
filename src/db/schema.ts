@@ -35,6 +35,8 @@ export const chatMessages = pgTable("chat_messages", {
   groupId: integer("group_id").notNull(),
   senderId: integer("sender_id").notNull(),
   content: text("content").notNull(),
+  attachmentUrl: text("attachment_url"),
+  attachmentName: text("attachment_name"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
